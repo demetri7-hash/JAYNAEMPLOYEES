@@ -8,47 +8,46 @@ Start here. This repo currently contains:
 
 ## Quick Start
 
-1) Create a free Supabase project
-- Go to Supabase, create a project.
-- In SQL Editor, paste the entire contents of `db/supabase_schema.sql` and run it.
-- In Storage, ensure the `attachments` bucket exists; if not, re-run the storage command in the SQL.
-- In Table Editor, confirm `roles`, `flows`, and policies exist.
+## Quick Start (Easy Steps)
 
-2) Create your user and make yourself General Manager
-- Sign up in the app later, or create an auth user in Supabase Auth.
-- After your user exists, add a row to `user_roles` mapping your user id to the `general_manager` role.
+1) Create your Supabase project (already done!)
 
-3) Answer clarifications
-- Open `docs/APP_OUTLINE.md` and `docs/DEV_PLAN.md` and fill in all [Clarify] sections inline.
+2) Add yourself as General Manager
+	- Go to Supabase dashboard > Authentication > Users
+	- Click "Add User" and enter your email and a password you want to use
+	- After you create your user, go to Table Editor > user_roles
+	- Click "Insert Row"
+	- For `user_id`, paste your new user's ID (find it in Authentication > Users)
+	- For `role_id`, enter the number for General Manager (usually 1, check the roles table to confirm)
+	- Click "Save"
 
-4) App scaffold (coming next)
-- We’ll generate a Next.js app with Supabase auth and the home screen in the next step once clarifications are in.
+3) Fill in clarifications
+	- Open `docs/APP_OUTLINE.md` and `docs/DEV_PLAN.md` in VS Code
+	- Answer any questions marked [Clarify] directly in the files
 
-## Optional: Local dev with Supabase CLI
-If you prefer local dev, you can run Supabase locally and apply the schema.
+4) Next steps (app scaffold)
+	- Once you finish the clarifications, let me know
+	- I’ll generate the starter Next.js app for you, with login and home screen wired to Supabase
+
+## Optional: Local Supabase (for advanced users)
+If you want to run Supabase on your own computer:
 
 ```sh
-# Install supabase cli
 brew install supabase/tap/supabase
-
-# Initialize (inside a new app folder, not this docs repo)
 supabase init
-
-# Start local stack
 supabase start
-
-# Apply schema
 psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f db/supabase_schema.sql
 ```
 
 ## Notifications
-- In-app alerts are enabled via database tables and Realtime (enable Realtime for `task_instances`, `transfers`, `notifications`).
-- Web Push can be added for free later; we’ll wire it in Phase 5 if desired.
+- In-app alerts are built-in (enable Realtime for `task_instances`, `transfers`, `notifications` in Supabase dashboard)
+- Web Push can be added later for free
 
 ## Embedding in Google Sites
-- We’ll deploy to Vercel later; embed the app URL in a full-width/full-height iframe inside Google Sites.
-- We’ll ensure headers allow embedding and CSP is safe.
+- When the app is ready, you’ll get a public URL
+- In Google Sites, add an "Embed" block and paste the app URL
+- Make it full-width and full-height for best results
 
-## Next
-- Fill in the clarifications.
-- Tell me when you’re ready, and I’ll generate the starter Next.js app with the Home screen wired to Supabase.
+## What’s next?
+- Fill in the clarifications in the docs
+- Tell me when you’re ready, and I’ll build the starter app for you

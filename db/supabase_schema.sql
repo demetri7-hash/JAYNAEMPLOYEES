@@ -10,7 +10,7 @@ create extension if not exists vector; -- optional future search
 -- Auth-profiles
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  email text generated always as (auth.email()) stored,
+  email text,
   display_name text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -236,7 +236,6 @@ create table if not exists public.prep_plan_tasks (
 );
 
 -- Storage bucket for attachments
-select storage.create_bucket('attachments', public := true);
 
 -- RLS
 alter table public.profiles enable row level security;
@@ -254,25 +253,25 @@ alter table public.prep_plans enable row level security;
 alter table public.prep_plan_tasks enable row level security;
 
 -- Profiles: user can see self; managers can see all
-create policy if not exists profiles_self_select on public.profiles
+create policy profiles_self_select on public.profiles
 for select using (
   auth.uid() = id or public.is_manager(auth.uid())
 );
 
-create policy if not exists profiles_self_update on public.profiles
+create policy profiles_self_update on public.profiles
 for update using (auth.uid() = id) with check (auth.uid() = id);
 
 -- User roles: managers manage; users can read own
-create policy if not exists user_roles_select on public.user_roles
+create policy user_roles_select on public.user_roles
 for select using (
   public.is_manager(auth.uid()) or user_id = auth.uid()
 );
 
-create policy if not exists user_roles_manage on public.user_roles
+create policy user_roles_manage on public.user_roles
 for all using (public.is_manager(auth.uid())) with check (public.is_manager(auth.uid()));
 
 -- Templates: managers read/write; non-managers read only if relevant
-create policy if not exists templates_select on public.task_templates
+create policy templates_select on public.task_templates
 for select using (
   public.is_manager(auth.uid()) or exists (
     select 1 from public.template_assignees ta
@@ -282,54 +281,54 @@ for select using (
   )
 );
 
-create policy if not exists templates_manage on public.task_templates
+create policy templates_manage on public.task_templates
 for all using (public.is_manager(auth.uid())) with check (public.is_manager(auth.uid()));
 
 -- Template assignees: managers only
-create policy if not exists template_assignees_all on public.template_assignees
+create policy template_assignees_all on public.template_assignees
 for all using (public.is_manager(auth.uid())) with check (public.is_manager(auth.uid()));
 
 -- Task instances: owner or manager can read; owner can update own; manager can all
-create policy if not exists task_instances_select on public.task_instances
+create policy task_instances_select on public.task_instances
 for select using (
   assignee_user_id = auth.uid() or public.is_manager(auth.uid())
 );
 
-create policy if not exists task_instances_update on public.task_instances
+create policy task_instances_update on public.task_instances
 for update using (
   assignee_user_id = auth.uid() or public.is_manager(auth.uid())
 ) with check (
   assignee_user_id = auth.uid() or public.is_manager(auth.uid())
 );
 
-create policy if not exists task_instances_insert on public.task_instances
+create policy task_instances_insert on public.task_instances
 for insert with check (
   public.is_manager(auth.uid())
 );
 
 -- Attachments: visible to task owner/managers; insert by owner/managers
-create policy if not exists attachments_select on public.attachments
+create policy attachments_select on public.attachments
 for select using (
   exists (select 1 from public.task_instances ti where ti.id = attachments.task_instance_id and (ti.assignee_user_id = auth.uid() or public.is_manager(auth.uid())))
 );
 
-create policy if not exists attachments_insert on public.attachments
+create policy attachments_insert on public.attachments
 for insert with check (
   exists (select 1 from public.task_instances ti where ti.id = attachments.task_instance_id and (ti.assignee_user_id = auth.uid() or public.is_manager(auth.uid())))
 );
 
 -- Transfers: participants and managers can read; inserts by owner; updates by recipient/managers
-create policy if not exists transfers_select on public.transfers
+create policy transfers_select on public.transfers
 for select using (
   from_user_id = auth.uid() or to_user_id = auth.uid() or public.is_manager(auth.uid())
 );
 
-create policy if not exists transfers_insert on public.transfers
+create policy transfers_insert on public.transfers
 for insert with check (
   from_user_id = auth.uid()
 );
 
-create policy if not exists transfers_update on public.transfers
+create policy transfers_update on public.transfers
 for update using (
   to_user_id = auth.uid() or public.is_manager(auth.uid())
 ) with check (
@@ -337,19 +336,19 @@ for update using (
 );
 
 -- Notifications: per-user
-create policy if not exists notifications_self on public.notifications
+create policy notifications_self on public.notifications
 for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- Inventory: managers and lead prep can manage; all prep cooks can read/write counts
-create policy if not exists inventory_items_select on public.inventory_items
+create policy inventory_items_select on public.inventory_items
 for select using (true);
 
-create policy if not exists inventory_items_manage on public.inventory_items
+create policy inventory_items_manage on public.inventory_items
 for all using (
   public.is_manager(auth.uid())
 ) with check (public.is_manager(auth.uid()));
 
-create policy if not exists inventory_sessions_all on public.inventory_sessions
+create policy inventory_sessions_all on public.inventory_sessions
 for all using (
   public.is_manager(auth.uid()) or exists (
     select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
@@ -362,7 +361,7 @@ for all using (
   )
 );
 
-create policy if not exists inventory_counts_all on public.inventory_counts
+create policy inventory_counts_all on public.inventory_counts
 for all using (
   public.is_manager(auth.uid()) or exists (
     select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
@@ -376,7 +375,7 @@ for all using (
 );
 
 -- Prep plans: managers and prep roles
-create policy if not exists prep_plans_all on public.prep_plans
+create policy prep_plans_all on public.prep_plans
 for all using (
   public.is_manager(auth.uid()) or exists (
     select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
@@ -389,7 +388,7 @@ for all using (
   )
 );
 
-create policy if not exists prep_plan_tasks_all on public.prep_plan_tasks
+create policy prep_plan_tasks_all on public.prep_plan_tasks
 for all using (
   public.is_manager(auth.uid()) or exists (
     select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
