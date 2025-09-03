@@ -12,6 +12,8 @@ type Task = {
   due_at?: string | null;
   status?: string | null;
   completed_at?: string | null;
+  assignee_user_id?: string | null;
+  assignee_role_id?: string | null;
 };
 
 export default function TodayPage() {
@@ -19,18 +21,23 @@ export default function TodayPage() {
   const [error, setError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [updatingIds, setUpdatingIds] = useState<Set<string | number>>(new Set());
+  const [filter, setFilter] = useState<'all' | 'mine' | 'role'>('all');
+  const [uid, setUid] = useState<string | null>(null);
+  const [roleIds, setRoleIds] = useState<string[]>([]);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
   useEffect(() => {
+    let sub: any = null;
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
         const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
         if (sessionErr) throw sessionErr;
-        const uid = sessionData.session?.user?.id;
-        if (!uid) {
+        const _uid = sessionData.session?.user?.id;
+        setUid(_uid || null);
+        if (!_uid) {
           setTasks([]);
           setLoading(false);
           return;
@@ -40,27 +47,28 @@ export default function TodayPage() {
         const { data: userRoles, error: urErr } = await supabase
           .from("user_roles")
           .select("role_id")
-          .eq("user_id", uid);
+          .eq("user_id", _uid);
         if (urErr) throw urErr;
-        const roleIds = (userRoles || []).map((r: any) => r.role_id);
+        const _roleIds = (userRoles || []).map((r: any) => r.role_id);
+        setRoleIds(_roleIds);
 
         // Query tasks directly assigned to the user for today
         const { data: userTasks, error: userTasksErr } = await supabase
           .from("task_instances")
           .select("*")
           .eq("for_date", today)
-          .eq("assignee_user_id", uid)
+          .eq("assignee_user_id", _uid)
           .order("due_at", { ascending: true, nullsFirst: true });
         if (userTasksErr) throw userTasksErr;
 
         // Query tasks assigned to any of the user's roles for today
         let roleTasks: Task[] = [];
-        if (roleIds.length > 0) {
+        if (_roleIds.length > 0) {
           const { data: _roleTasks, error: roleTasksErr } = await supabase
             .from("task_instances")
             .select("*")
             .eq("for_date", today)
-            .in("assignee_role_id", roleIds)
+            .in("assignee_role_id", _roleIds)
             .order("due_at", { ascending: true, nullsFirst: true });
           if (roleTasksErr) throw roleTasksErr;
           roleTasks = _roleTasks || [];
@@ -86,6 +94,36 @@ export default function TodayPage() {
         });
 
         setTasks(merged);
+
+        // Subscribe to realtime changes for today
+        sub = supabase
+          .channel('today-tasks')
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'task_instances',
+            filter: `for_date=eq.${today}`,
+          }, (payload: any) => {
+            setTasks((prev) => {
+              if (payload.eventType === 'INSERT') {
+                // Add new task if not present
+                if (!prev.some((t) => t.id === payload.new.id)) {
+                  return [...prev, payload.new];
+                }
+                return prev;
+              }
+              if (payload.eventType === 'UPDATE') {
+                // Update task
+                return prev.map((t) => t.id === payload.new.id ? { ...t, ...payload.new } : t);
+              }
+              if (payload.eventType === 'DELETE') {
+                // Remove task
+                return prev.filter((t) => t.id !== payload.old.id);
+              }
+              return prev;
+            });
+          })
+          .subscribe();
       } catch (e: any) {
         setError(e?.message || "Failed to load tasks");
       } finally {
@@ -93,6 +131,9 @@ export default function TodayPage() {
       }
     };
     load();
+    return () => {
+      if (sub) sub.unsubscribe();
+    };
   }, [today]);
 
   const toggleDone = async (task: Task) => {
@@ -122,16 +163,41 @@ export default function TodayPage() {
     }
   };
 
+  // Filter logic
+  const filteredTasks = useMemo(() => {
+    if (filter === 'mine' && uid) {
+      return tasks.filter((t) => t.assignee_user_id === uid);
+    }
+    if (filter === 'role' && roleIds.length > 0) {
+      return tasks.filter((t) => t.assignee_role_id && roleIds.includes(t.assignee_role_id));
+    }
+    return tasks;
+  }, [tasks, filter, uid, roleIds]);
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Today’s Tasks</h1>
+      <div className="flex gap-2 mb-2">
+        <button
+          className={`px-3 py-1 rounded border text-sm ${filter === 'all' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white'}`}
+          onClick={() => setFilter('all')}
+        >All</button>
+        <button
+          className={`px-3 py-1 rounded border text-sm ${filter === 'mine' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white'}`}
+          onClick={() => setFilter('mine')}
+        >Mine</button>
+        <button
+          className={`px-3 py-1 rounded border text-sm ${filter === 'role' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white'}`}
+          onClick={() => setFilter('role')}
+        >By Role</button>
+      </div>
       {loading && <p className="text-gray-600">Loading…</p>}
       {error && <p className="text-red-600 text-sm">{error}</p>}
-      {!loading && !error && tasks.length === 0 && (
+      {!loading && !error && filteredTasks.length === 0 && (
         <p className="text-gray-600">No tasks for today.</p>
       )}
       <ul className="space-y-2">
-        {tasks.map((t) => {
+        {filteredTasks.map((t) => {
           const title = t.title || t.name || `Task ${t.id}`;
           const done = !!(t.completed_at || t.status === "completed" || t.status === "done");
           return (
