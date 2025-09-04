@@ -44,6 +44,24 @@ export default function OrderingManagerPage() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [taskFilter, setTaskFilter] = useState<'all' | 'inventory' | 'vendor' | 'delivery'>('all');
 
+  // Ordering Management state
+  const [showInventoryManagement, setShowInventoryManagement] = useState(false);
+  const [showSupplierCoordination, setShowSupplierCoordination] = useState(false);
+  const [showCostTracking, setShowCostTracking] = useState(false);
+  const [showOrderHistory, setShowOrderHistory] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState("");
+  const [lowStockItems, setLowStockItems] = useState("");
+  const [orderNotes, setOrderNotes] = useState("");
+  const [savingInventory, setSavingInventory] = useState(false);
+  const [supplierName, setSupplierName] = useState("");
+  const [supplierItems, setSupplierItems] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [orderAmount, setOrderAmount] = useState("");
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [budgetNotes, setBudgetNotes] = useState("");
+  const [monthlyCost, setMonthlyCost] = useState("");
+  const [savingCosts, setSavingCosts] = useState(false);
+
   // Load users and roles
   useEffect(() => {
     const loadMeta = async () => {
@@ -198,6 +216,81 @@ export default function OrderingManagerPage() {
     }
   };
 
+  // Save inventory management
+  const saveInventoryManagement = async () => {
+    setSavingInventory(true);
+    try {
+      const { error } = await supabase
+        .from("daily_reports")
+        .upsert({
+          date: today,
+          report_type: "inventory_management",
+          notes: `Inventory Items: ${inventoryItems}\n\nLow Stock: ${lowStockItems}\n\nOrder Notes: ${orderNotes}`,
+          created_by: (await supabase.auth.getSession()).data.session?.user?.id,
+        });
+      
+      if (error) throw error;
+      setInventoryItems("");
+      setLowStockItems("");
+      setOrderNotes("");
+      setShowInventoryManagement(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save inventory management");
+    } finally {
+      setSavingInventory(false);
+    }
+  };
+
+  // Save supplier order
+  const saveSupplierOrder = async () => {
+    setSavingOrder(true);
+    try {
+      const { error } = await supabase
+        .from("daily_reports")
+        .upsert({
+          date: today,
+          report_type: "supplier_order",
+          notes: `Supplier: ${supplierName}\n\nItems: ${supplierItems}\n\nDelivery Date: ${deliveryDate}\n\nAmount: $${orderAmount}`,
+          created_by: (await supabase.auth.getSession()).data.session?.user?.id,
+        });
+      
+      if (error) throw error;
+      setSupplierName("");
+      setSupplierItems("");
+      setDeliveryDate("");
+      setOrderAmount("");
+      setShowSupplierCoordination(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save supplier order");
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  // Save cost tracking
+  const saveCostTracking = async () => {
+    setSavingCosts(true);
+    try {
+      const { error } = await supabase
+        .from("daily_reports")
+        .upsert({
+          date: today,
+          report_type: "cost_tracking",
+          notes: `Monthly Cost Analysis: $${monthlyCost}\n\nBudget Notes: ${budgetNotes}`,
+          created_by: (await supabase.auth.getSession()).data.session?.user?.id,
+        });
+      
+      if (error) throw error;
+      setBudgetNotes("");
+      setMonthlyCost("");
+      setShowCostTracking(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save cost tracking");
+    } finally {
+      setSavingCosts(false);
+    }
+  };
+
   return (
     <div className="space-y-4 p-4">
       <h1 className="text-2xl font-bold text-center mb-4">📦 Ordering Manager Dashboard</h1>
@@ -220,6 +313,254 @@ export default function OrderingManagerPage() {
             {filteredTasks.filter(t => !t.completed_at && t.status !== 'completed').length}
           </div>
         </div>
+      </div>
+
+      {/* Ordering Management Dashboard */}
+      <div className="bg-white p-6 rounded-lg shadow border-t-4 border-blue-500 mb-4">
+        <h2 className="text-xl font-semibold mb-4 text-blue-600">📦 Ordering & Inventory Operations</h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <button
+            onClick={() => setShowInventoryManagement(!showInventoryManagement)}
+            className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 text-left transition-colors"
+          >
+            <div className="font-medium text-blue-700">📊 Inventory Management</div>
+            <div className="text-sm text-blue-600">Track stock levels and order requirements</div>
+          </button>
+          
+          <button
+            onClick={() => setShowSupplierCoordination(!showSupplierCoordination)}
+            className="p-4 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200 text-left transition-colors"
+          >
+            <div className="font-medium text-green-700">🚚 Supplier Coordination</div>
+            <div className="text-sm text-green-600">Manage orders and supplier relationships</div>
+          </button>
+          
+          <button
+            onClick={() => setShowCostTracking(!showCostTracking)}
+            className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 text-left transition-colors"
+          >
+            <div className="font-medium text-purple-700">💰 Cost Tracking</div>
+            <div className="text-sm text-purple-600">Monitor budgets and spending analysis</div>
+          </button>
+          
+          <button
+            onClick={() => setShowOrderHistory(!showOrderHistory)}
+            className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg border border-orange-200 text-left transition-colors"
+          >
+            <div className="font-medium text-orange-700">📈 Order History</div>
+            <div className="text-sm text-orange-600">Review past orders and trends</div>
+          </button>
+        </div>
+
+        {/* Inventory Management */}
+        {showInventoryManagement && (
+          <div className="border rounded-lg p-4 mb-4 bg-blue-50">
+            <h3 className="font-medium text-blue-700 mb-3">📊 Inventory Management</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Current Inventory Items
+                  </label>
+                  <textarea
+                    value={inventoryItems}
+                    onChange={(e) => setInventoryItems(e.target.value)}
+                    placeholder="List current inventory items and quantities..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Low Stock Items
+                  </label>
+                  <textarea
+                    value={lowStockItems}
+                    onChange={(e) => setLowStockItems(e.target.value)}
+                    placeholder="Items running low that need reordering..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Order Notes
+                  </label>
+                  <textarea
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    placeholder="Priority items, special requirements, deadlines..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              
+              <button
+                onClick={saveInventoryManagement}
+                disabled={savingInventory || (!inventoryItems.trim() && !lowStockItems.trim() && !orderNotes.trim())}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+              >
+                {savingInventory ? '📊 Saving...' : '📊 Save Inventory Management'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Supplier Coordination */}
+        {showSupplierCoordination && (
+          <div className="border rounded-lg p-4 mb-4 bg-green-50">
+            <h3 className="font-medium text-green-700 mb-3">🚚 Supplier Coordination</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Supplier Name
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierName}
+                    onChange={(e) => setSupplierName(e.target.value)}
+                    placeholder="Enter supplier name"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Expected Delivery Date
+                  </label>
+                  <input
+                    type="date"
+                    value={deliveryDate}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Items Ordered
+                  </label>
+                  <textarea
+                    value={supplierItems}
+                    onChange={(e) => setSupplierItems(e.target.value)}
+                    placeholder="List items, quantities, specifications..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Order Amount ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={orderAmount}
+                    onChange={(e) => setOrderAmount(e.target.value)}
+                    placeholder="Total order amount"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+              
+              <button
+                onClick={saveSupplierOrder}
+                disabled={savingOrder || !supplierName.trim()}
+                className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors"
+              >
+                {savingOrder ? '🚚 Saving...' : '🚚 Save Supplier Order'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Cost Tracking */}
+        {showCostTracking && (
+          <div className="border rounded-lg p-4 mb-4 bg-purple-50">
+            <h3 className="font-medium text-purple-700 mb-3">💰 Cost Tracking & Budget Analysis</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Monthly Cost Analysis ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={monthlyCost}
+                    onChange={(e) => setMonthlyCost(e.target.value)}
+                    placeholder="Enter monthly cost total"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Budget Notes & Analysis
+                  </label>
+                  <textarea
+                    value={budgetNotes}
+                    onChange={(e) => setBudgetNotes(e.target.value)}
+                    placeholder="Budget variance, cost-saving opportunities, trends..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-white rounded border">
+                <div className="text-center">
+                  <div className="text-lg font-bold text-purple-700">Food Costs</div>
+                  <div className="text-sm text-gray-600">Track food & beverage expenses</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-purple-700">Supply Costs</div>
+                  <div className="text-sm text-gray-600">Monitor supplies & packaging</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-purple-700">Vendor Analysis</div>
+                  <div className="text-sm text-gray-600">Compare supplier pricing</div>
+                </div>
+              </div>
+              
+              <button
+                onClick={saveCostTracking}
+                disabled={savingCosts || (!monthlyCost.trim() && !budgetNotes.trim())}
+                className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 transition-colors"
+              >
+                {savingCosts ? '💰 Saving...' : '💰 Save Cost Tracking'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Order History */}
+        {showOrderHistory && (
+          <div className="border rounded-lg p-4 mb-4 bg-orange-50">
+            <h3 className="font-medium text-orange-700 mb-3">📈 Order History & Trends</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-white p-4 rounded border">
+                <div className="font-medium text-orange-700">Recent Orders</div>
+                <div className="text-sm text-gray-600 mt-2">
+                  • Order tracking and delivery status
+                  <br />• Supplier performance metrics  
+                  <br />• Recurring order patterns
+                </div>
+              </div>
+              <div className="bg-white p-4 rounded border">
+                <div className="font-medium text-orange-700">Spending Trends</div>
+                <div className="text-sm text-gray-600 mt-2">
+                  • Monthly cost comparisons
+                  <br />• Seasonal ordering patterns
+                  <br />• Budget vs. actual analysis
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quick Actions */}

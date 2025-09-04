@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase-browser";
 
-type User = { id: string; email?: string; name?: string };
+type User = { id: string; email?: string; name?: string; role?: string };
 type Role = { id: string; name: string };
 
 type Task = {
@@ -59,6 +59,23 @@ export default function KitchenManagerPage() {
 
   // Kitchen-specific filters
   const [taskFilter, setTaskFilter] = useState<'all' | 'prep' | 'line' | 'cleaning'>('all');
+
+  // Kitchen Management state
+  const [showKitchenOps, setShowKitchenOps] = useState(false);
+  const [showPrepManagement, setShowPrepManagement] = useState(false);
+  const [showFoodSafety, setShowFoodSafety] = useState(false);
+  const [showStaffOversight, setShowStaffOversight] = useState(false);
+  const [kitchenStaff, setKitchenStaff] = useState<User[]>([]);
+  const [prepItems, setPrepItems] = useState("");
+  const [prepNotes, setPrepNotes] = useState("");
+  const [savingPrep, setSavingPrep] = useState(false);
+  const [tempLogs, setTempLogs] = useState("");
+  const [safetyNotes, setSafetyNotes] = useState("");
+  const [savingSafety, setSavingSafety] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState("");
+  const [shiftNotes, setShiftNotes] = useState("");
+  const [selectedPrepTask, setSelectedPrepTask] = useState("");
+  const [assignedStaff, setAssignedStaff] = useState<string[]>([]);
 
   // Load users and roles
   useEffect(() => {
@@ -252,6 +269,102 @@ export default function KitchenManagerPage() {
     }
   };
 
+  // Load kitchen staff (all cooks)
+  const loadKitchenStaff = async () => {
+    try {
+      const { data: staff } = await supabase
+        .from("user_roles")
+        .select(`
+          user_id,
+          profiles!inner(id, email, name),
+          roles!inner(name)
+        `)
+        .in("roles.name", ["opening_line_cook", "lead_prep_cook", "opening_prep_cook", "transition_line_cook", "closing_line_cook"]);
+      
+      if (staff) {
+        const members = staff.map((item: any) => ({
+          id: item.profiles.id,
+          email: item.profiles.email,
+          name: item.profiles.name,
+          role: item.roles.name
+        }));
+        setKitchenStaff(members);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to load kitchen staff");
+    }
+  };
+
+  // Save prep management notes
+  const savePrepManagement = async () => {
+    setSavingPrep(true);
+    try {
+      const { error } = await supabase
+        .from("daily_reports")
+        .upsert({
+          date: today,
+          report_type: "prep_management",
+          notes: `Items: ${prepItems}\n\nNotes: ${prepNotes}`,
+          created_by: (await supabase.auth.getSession()).data.session?.user?.id,
+        });
+      
+      if (error) throw error;
+      setPrepItems("");
+      setPrepNotes("");
+      setShowPrepManagement(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save prep notes");
+    } finally {
+      setSavingPrep(false);
+    }
+  };
+
+  // Save food safety logs
+  const saveFoodSafety = async () => {
+    setSavingSafety(true);
+    try {
+      const { error } = await supabase
+        .from("daily_reports")
+        .upsert({
+          date: today,
+          report_type: "food_safety",
+          notes: `Temperature Logs: ${tempLogs}\n\nSafety Notes: ${safetyNotes}`,
+          created_by: (await supabase.auth.getSession()).data.session?.user?.id,
+        });
+      
+      if (error) throw error;
+      setTempLogs("");
+      setSafetyNotes("");
+      setShowFoodSafety(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save safety logs");
+    } finally {
+      setSavingSafety(false);
+    }
+  };
+
+  // Assign prep task to kitchen staff
+  const assignPrepTask = async (taskId: string | number, staffIds: string[]) => {
+    try {
+      for (const staffId of staffIds) {
+        await supabase
+          .from("task_instances")
+          .insert([{
+            title: tasks.find(t => t.id === taskId)?.title || "Prep Task",
+            notes: tasks.find(t => t.id === taskId)?.notes,
+            for_date: today,
+            due_at: tasks.find(t => t.id === taskId)?.due_at,
+            assignee_user_id: staffId,
+            status: "pending",
+          }]);
+      }
+      setSelectedPrepTask("");
+      setAssignedStaff([]);
+    } catch (e: any) {
+      setError(e?.message || "Failed to assign prep task");
+    }
+  };
+
   return (
     <div className="space-y-4 p-4">
       <h1 className="text-2xl font-bold text-center mb-4">🍽️ Kitchen Manager Dashboard</h1>
@@ -272,17 +385,247 @@ export default function KitchenManagerPage() {
         </div>
       </div>
 
+      {/* Kitchen Management Dashboard */}
+      <div className="bg-white p-6 rounded-lg shadow border-t-4 border-green-500 mb-4">
+        <h2 className="text-xl font-semibold mb-4 text-green-600">🍽️ Kitchen Operations</h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <button
+            onClick={() => setShowKitchenOps(!showKitchenOps)}
+            className="p-4 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200 text-left transition-colors"
+          >
+            <div className="font-medium text-green-700">🎯 Kitchen Operations</div>
+            <div className="text-sm text-green-600">Manage daily kitchen tasks and workflow</div>
+          </button>
+          
+          <button
+            onClick={() => {
+              loadKitchenStaff();
+              setShowPrepManagement(!showPrepManagement);
+            }}
+            className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 text-left transition-colors"
+          >
+            <div className="font-medium text-blue-700">🥗 Prep Management</div>
+            <div className="text-sm text-blue-600">Track prep lists and assignments</div>
+          </button>
+          
+          <button
+            onClick={() => setShowFoodSafety(!showFoodSafety)}
+            className="p-4 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200 text-left transition-colors"
+          >
+            <div className="font-medium text-red-700">🌡️ Food Safety</div>
+            <div className="text-sm text-red-600">Temperature logs and safety protocols</div>
+          </button>
+          
+          <button
+            onClick={() => {
+              loadKitchenStaff();
+              setShowStaffOversight(!showStaffOversight);
+            }}
+            className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 text-left transition-colors"
+          >
+            <div className="font-medium text-purple-700">👥 Staff Oversight</div>
+            <div className="text-sm text-purple-600">Manage kitchen team and assignments</div>
+          </button>
+        </div>
+
+        {/* Kitchen Operations */}
+        {showKitchenOps && (
+          <div className="border rounded-lg p-4 mb-4 bg-green-50">
+            <h3 className="font-medium text-green-700 mb-3">🎯 Kitchen Operations</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                className="p-4 bg-white rounded-lg border border-green-200 hover:bg-green-50 transition-colors"
+                onClick={createKitchenTasks}
+                disabled={creating}
+              >
+                <div className="font-medium text-green-700">
+                  {creating ? "Creating..." : "🎯 Generate Kitchen Tasks"}
+                </div>
+                <div className="text-sm text-green-600">Create daily kitchen workflow tasks</div>
+              </button>
+              
+              <button
+                className="p-4 bg-white rounded-lg border border-green-200 hover:bg-green-50 transition-colors"
+                onClick={() => setShowCreate(!showCreate)}
+              >
+                <div className="font-medium text-green-700">
+                  {showCreate ? "❌ Cancel" : "➕ Create Custom Task"}
+                </div>
+                <div className="text-sm text-green-600">Add specific kitchen task</div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Prep Management */}
+        {showPrepManagement && (
+          <div className="border rounded-lg p-4 mb-4 bg-blue-50">
+            <h3 className="font-medium text-blue-700 mb-3">🥗 Prep Management</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prep Items for {today}
+                  </label>
+                  <textarea
+                    value={prepItems}
+                    onChange={(e) => setPrepItems(e.target.value)}
+                    placeholder="List prep items needed today..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Prep Notes & Instructions
+                  </label>
+                  <textarea
+                    value={prepNotes}
+                    onChange={(e) => setPrepNotes(e.target.value)}
+                    placeholder="Special instructions, quantities, deadlines..."
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Assign Prep Task to Kitchen Staff
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <select
+                    value={selectedPrepTask}
+                    onChange={(e) => setSelectedPrepTask(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select prep task</option>
+                    {tasks.filter(t => t.title?.toLowerCase().includes('prep')).map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.title}
+                      </option>
+                    ))}
+                  </select>
+                  
+                  <div className="space-y-2 max-h-32 overflow-y-auto border rounded p-2 bg-white">
+                    {kitchenStaff.map((staff) => (
+                      <label key={staff.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={assignedStaff.includes(staff.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setAssignedStaff([...assignedStaff, staff.id]);
+                            } else {
+                              setAssignedStaff(assignedStaff.filter(id => id !== staff.id));
+                            }
+                          }}
+                          className="mr-2"
+                        />
+                        <span className="text-sm">{staff.name} ({staff.role?.replace(/_/g, ' ')})</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => selectedPrepTask && assignPrepTask(selectedPrepTask, assignedStaff)}
+                  disabled={!selectedPrepTask || assignedStaff.length === 0}
+                  className="mt-3 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+                >
+                  🎯 Assign Prep Task to Selected Staff
+                </button>
+              </div>
+              
+              <button
+                onClick={savePrepManagement}
+                disabled={savingPrep || (!prepItems.trim() && !prepNotes.trim())}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 transition-colors"
+              >
+                {savingPrep ? '💾 Saving...' : '💾 Save Prep Management'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Food Safety */}
+        {showFoodSafety && (
+          <div className="border rounded-lg p-4 mb-4 bg-red-50">
+            <h3 className="font-medium text-red-700 mb-3">🌡️ Food Safety & Temperature Logs</h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Temperature Logs
+                  </label>
+                  <textarea
+                    value={tempLogs}
+                    onChange={(e) => setTempLogs(e.target.value)}
+                    placeholder="Freezer: -18°C ✓
+Cooler: 4°C ✓
+Hot holding: 65°C ✓
+Oil temp: 175°C ✓"
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Safety Notes & Incidents
+                  </label>
+                  <textarea
+                    value={safetyNotes}
+                    onChange={(e) => setSafetyNotes(e.target.value)}
+                    placeholder="Food safety observations, incidents, corrective actions taken..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+              </div>
+              
+              <button
+                onClick={saveFoodSafety}
+                disabled={savingSafety || (!tempLogs.trim() && !safetyNotes.trim())}
+                className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-300 transition-colors"
+              >
+                {savingSafety ? '🌡️ Saving...' : '🌡️ Save Food Safety Logs'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Staff Oversight */}
+        {showStaffOversight && (
+          <div className="border rounded-lg p-4 mb-4 bg-purple-50">
+            <h3 className="font-medium text-purple-700 mb-3">👥 Kitchen Staff Oversight</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {kitchenStaff.map((staff) => (
+                <div key={staff.id} className="bg-white p-4 rounded border hover:shadow-md transition-shadow">
+                  <div className="font-medium">{staff.name}</div>
+                  <div className="text-sm text-gray-600 capitalize">{staff.role?.replace(/_/g, ' ')}</div>
+                  <div className="mt-2 text-sm">
+                    <div className="text-green-600">✓ Tasks completed: {filteredTasks.filter(t => t.assignee_user_id === staff.id && (t.completed_at || t.status === 'completed')).length}</div>
+                    <div className="text-blue-600">• Active tasks: {filteredTasks.filter(t => t.assignee_user_id === staff.id && !t.completed_at && t.status !== 'completed').length}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Kitchen Action Buttons */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <button
-          className="rounded-lg bg-blue-600 px-4 py-3 text-white font-medium"
+          className="rounded-lg bg-green-600 px-4 py-3 text-white font-medium hover:bg-green-700 transition-colors"
           onClick={createKitchenTasks}
           disabled={creating}
         >
           {creating ? "Creating…" : "🎯 Generate Kitchen Tasks"}
         </button>
         <button
-          className="rounded-lg bg-green-600 px-4 py-3 text-white font-medium"
+          className="rounded-lg bg-blue-600 px-4 py-3 text-white font-medium hover:bg-blue-700 transition-colors"
           onClick={() => setShowCreate(v => !v)}
         >
           {showCreate ? "❌ Cancel" : "➕ Create Kitchen Task"}
