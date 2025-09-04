@@ -1,7 +1,6 @@
 {
-  "buildCommand": "cd app/web && npm run build",
+  "buildCommand": "pwd && ls -la && cd app/web && pwd && ls -la && npm run build",
   "outputDirectory": "app/web/.next",
-  "installCommand": "cd app/web && npm install",
-  "devCommand": "cd app/web && npm run dev",
-  "framework": "nextjs"
+  "installCommand": "pwd && ls -la && cd app/web && pwd && ls -la && npm install",
+  "devCommand": "cd app/web && npm run dev"
 }
