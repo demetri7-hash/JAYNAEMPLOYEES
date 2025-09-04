@@ -1,6 +1,41 @@
-# JAYNA Gyro — Web App
+# Jayna Gyro Employee Management System
 
-This is the Next.js (App Router) web app with Supabase auth.
+This is the Next.js (App Router) web app with Supabase auth for restaurant employee management.
+
+## Database Setup
+
+### 1. Set up Supabase Database
+
+1. Go to your Supabase project dashboard
+2. Navigate to the SQL Editor
+3. Run the SQL script in `database_schema.sql` to create all necessary tables and relationships
+
+### 2. Environment Variables
+
+Create a `.env.local` file in this directory with:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### 3. Database Schema Overview
+
+The system uses the following main tables:
+
+- **profiles** - User profiles linked to Supabase auth
+- **roles** - Available roles in the system  
+- **user_roles** - Junction table linking users to roles
+- **task_templates** - Reusable task templates
+- **task_instances** - Daily task assignments
+- **daily_reports** - Service notes and reports
+
+### 4. Default Roles
+
+The system creates these roles automatically:
+- general_manager, assistant_manager, kitchen_manager, ordering_manager
+- server, cashier, host, barista
+- opening_line_cook, lead_prep_cook, opening_prep_cook, transition_line_cook, closing_line_cook
 
 ## Setup
 
