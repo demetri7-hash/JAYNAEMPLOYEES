@@ -1,6 +1,6 @@
 {
-  "buildCommand": "pwd && ls -la && cd app/web && pwd && ls -la && npm run build",
-  "outputDirectory": "app/web/.next",
-  "installCommand": "pwd && ls -la && cd app/web && pwd && ls -la && npm install",
-  "devCommand": "cd app/web && npm run dev"
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev"
 }
