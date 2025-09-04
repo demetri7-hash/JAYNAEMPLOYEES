@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase-browser";
 
-type User = { id: string; email?: string; name?: string };
+type User = { id: string; email?: string; name?: string; role?: string };
 type Role = { id: string; name: string };
 
 type Task = {
@@ -44,6 +44,20 @@ export default function AssistantManagerPage() {
   });
   const [creatingTask, setCreatingTask] = useState(false);
   const [taskFilter, setTaskFilter] = useState<'all' | 'front' | 'service' | 'admin'>('all');
+
+  // Team Management state
+  const [showTeamManagement, setShowTeamManagement] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<User[]>([]);
+  const [showScheduling, setShowScheduling] = useState(false);
+  const [showServiceTracking, setShowServiceTracking] = useState(false);
+  const [showPerformance, setShowPerformance] = useState(false);
+  const [selectedMember, setSelectedMember] = useState("");
+  const [scheduleStart, setScheduleStart] = useState("");
+  const [scheduleEnd, setScheduleEnd] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [assignedMembers, setAssignedMembers] = useState<string[]>([]);
+  const [serviceNotes, setServiceNotes] = useState("");
+  const [savingServiceNotes, setSavingServiceNotes] = useState(false);
 
   // Load users and roles
   useEffect(() => {
@@ -150,6 +164,75 @@ export default function AssistantManagerPage() {
       setError(e?.message || "Failed to create task");
     } finally {
       setCreatingTask(false);
+    }
+  };
+
+  // Load team members (front-of-house staff)
+  const loadTeamMembers = async () => {
+    try {
+      const { data: frontStaff } = await supabase
+        .from("user_roles")
+        .select(`
+          user_id,
+          profiles!inner(id, email, name),
+          roles!inner(name)
+        `)
+        .in("roles.name", ["server", "cashier", "host", "barista"]);
+      
+      if (frontStaff) {
+        const members = frontStaff.map((item: any) => ({
+          id: item.profiles.id,
+          email: item.profiles.email,
+          name: item.profiles.name,
+          role: item.roles.name
+        }));
+        setTeamMembers(members);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to load team members");
+    }
+  };
+
+  // Save service quality notes
+  const saveServiceNotes = async () => {
+    setSavingServiceNotes(true);
+    try {
+      const { error } = await supabase
+        .from("daily_reports")
+        .upsert({
+          date: today,
+          report_type: "service_quality",
+          notes: serviceNotes,
+          created_by: (await supabase.auth.getSession()).data.session?.user?.id,
+        });
+      
+      if (error) throw error;
+      setServiceNotes("");
+      setShowServiceTracking(false);
+    } catch (e: any) {
+      setError(e?.message || "Failed to save service notes");
+    } finally {
+      setSavingServiceNotes(false);
+    }
+  };
+
+  // Assign task to multiple team members
+  const assignToTeam = async (taskId: string | number, userIds: string[]) => {
+    try {
+      for (const userId of userIds) {
+        await supabase
+          .from("task_instances")
+          .insert([{
+            title: tasks.find(t => t.id === taskId)?.title,
+            notes: tasks.find(t => t.id === taskId)?.notes,
+            for_date: today,
+            due_at: tasks.find(t => t.id === taskId)?.due_at,
+            assignee_user_id: userId,
+            status: "pending",
+          }]);
+      }
+    } catch (e: any) {
+      setError(e?.message || "Failed to assign to team");
     }
   };
 
@@ -442,6 +525,213 @@ export default function AssistantManagerPage() {
             <div className="text-sm">Create tasks to manage daily operations</div>
           </div>
         )
+      )}
+
+      {/* Team Management Section */}
+      <div className="bg-white p-6 rounded-lg shadow border-t-4 border-blue-500">
+        <h2 className="text-xl font-semibold mb-4 text-blue-600">👥 Team Management</h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <button
+            onClick={() => setShowScheduling(!showScheduling)}
+            className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 text-left transition-colors"
+          >
+            <div className="font-medium text-blue-700">📅 Schedule Management</div>
+            <div className="text-sm text-blue-600">Manage staff schedules and coverage</div>
+          </button>
+          
+          <button
+            onClick={() => {
+              loadTeamMembers();
+              setShowTeamManagement(!showTeamManagement);
+            }}
+            className="p-4 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200 text-left transition-colors"
+          >
+            <div className="font-medium text-green-700">🎯 Team Assignment</div>
+            <div className="text-sm text-green-600">Assign tasks to team members</div>
+          </button>
+          
+          <button
+            onClick={() => setShowServiceTracking(!showServiceTracking)}
+            className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 text-left transition-colors"
+          >
+            <div className="font-medium text-purple-700">⭐ Service Tracking</div>
+            <div className="text-sm text-purple-600">Track service quality and notes</div>
+          </button>
+          
+          <button
+            onClick={() => setShowPerformance(!showPerformance)}
+            className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg border border-orange-200 text-left transition-colors"
+          >
+            <div className="font-medium text-orange-700">📊 Performance Review</div>
+            <div className="text-sm text-orange-600">Review team performance</div>
+          </button>
+        </div>
+
+        {/* Schedule Manager */}
+        {showScheduling && (
+          <div className="border rounded-lg p-4 mb-4 bg-blue-50">
+            <h3 className="font-medium text-blue-700 mb-3">📅 Schedule Management</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Staff Member
+                </label>
+                <select
+                  value={selectedMember}
+                  onChange={(e) => setSelectedMember(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select staff member</option>
+                  {teamMembers.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name} ({member.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Time
+                </label>
+                <input
+                  type="time"
+                  value={scheduleStart}
+                  onChange={(e) => setScheduleStart(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Time
+                </label>
+                <input
+                  type="time"
+                  value={scheduleEnd}
+                  onChange={(e) => setScheduleEnd(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <button
+              className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              🕒 Update Schedule
+            </button>
+          </div>
+        )}
+
+        {/* Team Assignment */}
+        {showTeamManagement && (
+          <div className="border rounded-lg p-4 mb-4 bg-green-50">
+            <h3 className="font-medium text-green-700 mb-3">🎯 Team Assignment</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Select Task
+                </label>
+                <select
+                  value={selectedTaskId}
+                  onChange={(e) => setSelectedTaskId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">Select task to assign</option>
+                  {tasks.map((task) => (
+                    <option key={task.id} value={task.id}>
+                      {task.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Assign to Team Members
+                </label>
+                <div className="space-y-2 max-h-40 overflow-y-auto border rounded p-2 bg-white">
+                  {teamMembers.map((member) => (
+                    <label key={member.id} className="flex items-center hover:bg-gray-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={assignedMembers.includes(member.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setAssignedMembers([...assignedMembers, member.id]);
+                          } else {
+                            setAssignedMembers(assignedMembers.filter(id => id !== member.id));
+                          }
+                        }}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">{member.name} ({member.role})</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={() => selectedTaskId && assignToTeam(selectedTaskId, assignedMembers)}
+                disabled={!selectedTaskId || assignedMembers.length === 0}
+                className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 transition-colors"
+              >
+                ✅ Assign to Selected Team Members
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Service Tracking */}
+        {showServiceTracking && (
+          <div className="border rounded-lg p-4 mb-4 bg-purple-50">
+            <h3 className="font-medium text-purple-700 mb-3">⭐ Service Quality Tracking</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Service Notes for {today}
+                </label>
+                <textarea
+                  value={serviceNotes}
+                  onChange={(e) => setServiceNotes(e.target.value)}
+                  placeholder="Enter service quality observations, customer feedback, team performance notes..."
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+              <button
+                onClick={saveServiceNotes}
+                disabled={savingServiceNotes || !serviceNotes.trim()}
+                className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 transition-colors"
+              >
+                {savingServiceNotes ? '💾 Saving...' : '💾 Save Service Notes'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Performance Review */}
+        {showPerformance && (
+          <div className="border rounded-lg p-4 mb-4 bg-orange-50">
+            <h3 className="font-medium text-orange-700 mb-3">📊 Team Performance Overview</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {teamMembers.map((member) => (
+                <div key={member.id} className="bg-white p-3 rounded border hover:shadow-md transition-shadow">
+                  <div className="font-medium">{member.name}</div>
+                  <div className="text-sm text-gray-600 capitalize">{member.role}</div>
+                  <div className="mt-2 text-sm">
+                    <div className="text-green-600">✓ Tasks completed today: {filteredTasks.filter(t => t.assignee_user_id === member.id && (t.completed_at || t.status === 'completed')).length}</div>
+                    <div className="text-blue-600">• Active tasks: {filteredTasks.filter(t => t.assignee_user_id === member.id && !t.completed_at && t.status !== 'completed').length}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="p-4 border border-red-200 rounded-lg bg-red-50 text-red-700">
+          ⚠️ {error}
+          <button onClick={() => setError("")} className="float-right text-red-500 hover:text-red-700">✕</button>
+        </div>
       )}
     </div>
   );
