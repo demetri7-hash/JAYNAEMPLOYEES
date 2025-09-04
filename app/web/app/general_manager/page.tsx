@@ -59,6 +59,29 @@ export default function GeneralManagerPage() {
   });
   const [creatingTask, setCreatingTask] = useState(false);
 
+  // User management state
+  const [showUserManagement, setShowUserManagement] = useState(false);
+  const [newUser, setNewUser] = useState({
+    email: "",
+    password: "",
+    name: "",
+    role_id: "",
+  });
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
+
+  // Template management state
+  const [showTemplateManagement, setShowTemplateManagement] = useState(false);
+  const [newTemplate, setNewTemplate] = useState({
+    title: "",
+    description: "",
+    default_notes: "",
+    assignee_role_id: "",
+    due_at: "",
+  });
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+
   // Load users and roles for assignment/transfer
   useEffect(() => {
     const loadMeta = async () => {
@@ -183,6 +206,123 @@ export default function GeneralManagerPage() {
     }
   };
 
+  // User creation handler
+  const handleCreateUser = async (e: any) => {
+    e.preventDefault();
+    setCreatingUser(true);
+    setUserError(null);
+    try {
+      if (!newUser.email || !newUser.password) {
+        throw new Error("Email and password are required");
+      }
+
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newUser.email,
+        password: newUser.password,
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        // Create profile
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .insert([{
+            id: authData.user.id,
+            email: newUser.email,
+            name: newUser.name || null,
+          }]);
+
+        if (profileError) throw profileError;
+
+        // Assign role if selected
+        if (newUser.role_id) {
+          const { error: roleError } = await supabase
+            .from("user_roles")
+            .insert([{
+              user_id: authData.user.id,
+              role_id: newUser.role_id,
+            }]);
+
+          if (roleError) throw roleError;
+        }
+
+        // Refresh users list
+        const { data: userData } = await supabase.from("profiles").select("id,email,name");
+        setUsers(userData || []);
+
+        // Reset form
+        setNewUser({ email: "", password: "", name: "", role_id: "" });
+        setShowUserManagement(false);
+      }
+    } catch (e: any) {
+      setUserError(e?.message || "Failed to create user");
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  // Template creation handler
+  const handleCreateTemplate = async (e: any) => {
+    e.preventDefault();
+    setCreatingTemplate(true);
+    setTemplateError(null);
+    try {
+      if (!newTemplate.title) {
+        throw new Error("Template title is required");
+      }
+
+      const { error: templateError } = await supabase
+        .from("task_templates")
+        .insert([{
+          title: newTemplate.title,
+          description: newTemplate.description || null,
+          default_notes: newTemplate.default_notes || null,
+          assignee_role_id: newTemplate.assignee_role_id || null,
+          due_at: newTemplate.due_at || null,
+        }]);
+
+      if (templateError) throw templateError;
+
+      // Refresh templates list
+      const { data: tmpl, error: tmplErr } = await supabase
+        .from("task_templates")
+        .select("*");
+      if (tmplErr) throw tmplErr;
+      setTemplates(tmpl || []);
+
+      // Reset form
+      setNewTemplate({ title: "", description: "", default_notes: "", assignee_role_id: "", due_at: "" });
+      setShowTemplateManagement(false);
+    } catch (e: any) {
+      setTemplateError(e?.message || "Failed to create template");
+    } finally {
+      setCreatingTemplate(false);
+    }
+  };
+
+  // Delete template
+  const deleteTemplate = async (templateId: string | number) => {
+    try {
+      const { error } = await supabase
+        .from("task_templates")
+        .delete()
+        .eq("id", templateId);
+
+      if (error) throw error;
+
+      // Refresh templates list
+      const { data: tmpl, error: tmplErr } = await supabase
+        .from("task_templates")
+        .select("*");
+      if (tmplErr) throw tmplErr;
+      setTemplates(tmpl || []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to delete template");
+    }
+  };
+
   // Mark done/undo
   const toggleDone = async (task: Task) => {
     try {
@@ -250,19 +390,35 @@ export default function GeneralManagerPage() {
       
       {/* Quick Action Buttons */}
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <button
-          className="rounded-lg bg-emerald-600 px-4 py-3 text-white font-medium text-center"
-          onClick={createTasks}
-          disabled={creating}
-        >
-          {creating ? "Creating…" : "🎯 Generate Today's Tasks"}
-        </button>
-        <button
-          className="rounded-lg bg-blue-600 px-4 py-3 text-white font-medium text-center"
-          onClick={() => setShowCreate((v) => !v)}
-        >
-          {showCreate ? "❌ Cancel" : "➕ Create Custom Task"}
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className="rounded-lg bg-emerald-600 px-4 py-3 text-white font-medium text-center text-sm"
+            onClick={createTasks}
+            disabled={creating}
+          >
+            {creating ? "Creating…" : "🎯 Generate Tasks"}
+          </button>
+          <button
+            className="rounded-lg bg-blue-600 px-4 py-3 text-white font-medium text-center text-sm"
+            onClick={() => setShowCreate((v) => !v)}
+          >
+            {showCreate ? "❌ Cancel" : "➕ Create Task"}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            className="rounded-lg bg-purple-600 px-4 py-3 text-white font-medium text-center text-sm"
+            onClick={() => setShowUserManagement((v) => !v)}
+          >
+            {showUserManagement ? "❌ Cancel" : "👥 Users"}
+          </button>
+          <button
+            className="rounded-lg bg-orange-600 px-4 py-3 text-white font-medium text-center text-sm"
+            onClick={() => setShowTemplateManagement((v) => !v)}
+          >
+            {showTemplateManagement ? "❌ Cancel" : "📋 Templates"}
+          </button>
+        </div>
       </div>
       
       {/* Quick links */}
@@ -325,6 +481,198 @@ export default function GeneralManagerPage() {
             disabled={creatingTask}
           >{creatingTask ? "Creating…" : "✅ Create Task"}</button>
         </form>
+      )}
+      
+      {/* User Management Section */}
+      {showUserManagement && (
+        <div className="space-y-4 p-4 border rounded-lg bg-purple-50 mb-4">
+          <div className="font-semibold text-purple-900">👥 User Management</div>
+          
+          {/* Create New User Form */}
+          <form className="space-y-3 p-4 border rounded-lg bg-white" onSubmit={handleCreateUser}>
+            <div className="font-medium text-gray-900">➕ Create New User</div>
+            
+            {userError && (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
+                {userError}
+              </div>
+            )}
+            
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              type="email"
+              placeholder="Email address (required)"
+              value={newUser.email}
+              onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))}
+              required
+            />
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              type="password"
+              placeholder="Password (required, min 6 characters)"
+              value={newUser.password}
+              onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
+              minLength={6}
+              required
+            />
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              placeholder="Full name (optional)"
+              value={newUser.name}
+              onChange={e => setNewUser(u => ({ ...u, name: e.target.value }))}
+            />
+            <select
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              value={newUser.role_id}
+              onChange={e => setNewUser(u => ({ ...u, role_id: e.target.value }))}
+            >
+              <option value="">👥 Assign role (optional)</option>
+              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-purple-600 px-4 py-2 text-white font-medium"
+              disabled={creatingUser}
+            >
+              {creatingUser ? "Creating User..." : "✅ Create User"}
+            </button>
+          </form>
+
+          {/* Current Users List */}
+          <div className="p-4 border rounded-lg bg-white">
+            <div className="font-medium text-gray-900 mb-3">👤 Current Users ({users.length})</div>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {users.length === 0 ? (
+                <p className="text-gray-500 text-sm">No users found</p>
+              ) : (
+                users.map(user => (
+                  <div key={user.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                    <div>
+                      <div className="font-medium text-sm">{user.name || "No name"}</div>
+                      <div className="text-xs text-gray-600">{user.email}</div>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      ID: {user.id.slice(0, 8)}...
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Available Roles */}
+          <div className="p-4 border rounded-lg bg-white">
+            <div className="font-medium text-gray-900 mb-3">🏷️ Available Roles ({roles.length})</div>
+            <div className="grid grid-cols-2 gap-2">
+              {roles.map(role => (
+                <div key={role.id} className="p-2 bg-gray-50 rounded text-sm">
+                  <div className="font-medium">{role.name}</div>
+                  <div className="text-xs text-gray-600">ID: {role.id}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Template Management Section */}
+      {showTemplateManagement && (
+        <div className="space-y-4 p-4 border rounded-lg bg-orange-50 mb-4">
+          <div className="font-semibold text-orange-900">📋 Template Management</div>
+          
+          {/* Create New Template Form */}
+          <form className="space-y-3 p-4 border rounded-lg bg-white" onSubmit={handleCreateTemplate}>
+            <div className="font-medium text-gray-900">➕ Create New Template</div>
+            
+            {templateError && (
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
+                {templateError}
+              </div>
+            )}
+            
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              placeholder="Template title (required)"
+              value={newTemplate.title}
+              onChange={e => setNewTemplate(t => ({ ...t, title: e.target.value }))}
+              required
+            />
+            <textarea
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              rows={3}
+              placeholder="Template description"
+              value={newTemplate.description}
+              onChange={e => setNewTemplate(t => ({ ...t, description: e.target.value }))}
+            />
+            <textarea
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              rows={2}
+              placeholder="Default notes for tasks created from this template"
+              value={newTemplate.default_notes}
+              onChange={e => setNewTemplate(t => ({ ...t, default_notes: e.target.value }))}
+            />
+            <input
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              type="time"
+              placeholder="Default due time"
+              value={newTemplate.due_at}
+              onChange={e => setNewTemplate(t => ({ ...t, due_at: e.target.value }))}
+            />
+            <select
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              value={newTemplate.assignee_role_id}
+              onChange={e => setNewTemplate(t => ({ ...t, assignee_role_id: e.target.value }))}
+            >
+              <option value="">👥 Default role assignment (optional)</option>
+              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-orange-600 px-4 py-2 text-white font-medium"
+              disabled={creatingTemplate}
+            >
+              {creatingTemplate ? "Creating Template..." : "✅ Create Template"}
+            </button>
+          </form>
+
+          {/* Current Templates List */}
+          <div className="p-4 border rounded-lg bg-white">
+            <div className="font-medium text-gray-900 mb-3">📋 Current Templates ({templates.length})</div>
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {templates.length === 0 ? (
+                <p className="text-gray-500 text-sm">No templates found</p>
+              ) : (
+                templates.map(template => (
+                  <div key={template.id} className="p-3 bg-gray-50 rounded border">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{template.title}</div>
+                        {template.description && (
+                          <div className="text-xs text-gray-600 mt-1">{template.description}</div>
+                        )}
+                        {template.default_notes && (
+                          <div className="text-xs text-blue-600 mt-1">Notes: {template.default_notes}</div>
+                        )}
+                        <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                          {template.due_at && <span>⏰ {template.due_at}</span>}
+                          {template.assignee_role_id && (
+                            <span>👥 {roles.find(r => r.id === template.assignee_role_id)?.name}</span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteTemplate(template.id)}
+                        className="text-red-600 hover:text-red-800 text-sm px-2 py-1"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
       
       {loading && <p className="text-center text-gray-600">Loading tasks...</p>}
