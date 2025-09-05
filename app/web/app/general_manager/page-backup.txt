@@ -43,214 +43,260 @@ export default function GeneralManagerPage() {
   const [editReason, setEditReason] = useState<string>("");
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  // UI state
-  const [showCreate, setShowCreate] = useState(false);
-  const [showUserManagement, setShowUserManagement] = useState(false);
-  const [showTemplateManagement, setShowTemplateManagement] = useState(false);
-
-  // Forms state
-  const [newTask, setNewTask] = useState({ title: "", notes: "", due_at: "", assignee_user_id: "", assignee_role_id: "" });
-  const [creatingTask, setCreatingTask] = useState(false);
-  
-  const [newUser, setNewUser] = useState({ email: "", password: "", name: "", role_id: "" });
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [userError, setUserError] = useState<string | null>(null);
-  
-  const [newTemplate, setNewTemplate] = useState({ title: "", description: "", default_notes: "", assignee_role_id: "", assignee_user_id: "", due_at: "" });
-  const [creatingTemplate, setCreatingTemplate] = useState(false);
-  const [templateError, setTemplateError] = useState<string | null>(null);
-
   // Bulk actions and assignment state
   const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  
+  // Custom task creation state
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTask, setNewTask] = useState({
+    title: "",
+    notes: "",
+    due_at: "",
+    assignee_user_id: "",
+    assignee_role_id: "",
+  });
+  const [creatingTask, setCreatingTask] = useState(false);
+
+  // User management state
+  const [showUserManagement, setShowUserManagement] = useState(false);
+  const [newUser, setNewUser] = useState({
+    email: "",
+    password: "",
+    name: "",
+    role_id: "",
+  });
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
+
+  // Template management state
+  const [showTemplateManagement, setShowTemplateManagement] = useState(false);
+  const [newTemplate, setNewTemplate] = useState({
+    title: "",
+    description: "",
+    default_notes: "",
+    assignee_role_id: "",
+    due_at: "",
+  });
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+
+  // Load users and roles for assignment/transfer
+  useEffect(() => {
+    const loadMeta = async () => {
+      const { data: userData } = await supabase.from("profiles").select("id,email,name");
+      setUsers(userData || []);
+      const { data: roleData } = await supabase.from("roles").select("id,name");
+      setRoles(roleData || []);
+    };
+    loadMeta();
+  }, []);
 
   // Load all today's tasks and templates
   useEffect(() => {
-    let active = true;
-    
-    async function loadData() {
+    let sub: any = null;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        setLoading(true);
-        setError(null);
-        
         // Load all today's tasks
-        const { data: tasksData, error: tasksError } = await supabase
-          .from("tasks")
+        const { data: allTasks, error: allErr } = await supabase
+          .from("task_instances")
           .select("*")
           .eq("for_date", today)
-          .order("created_at", { ascending: false });
+          .order("due_at", { ascending: true, nullsFirst: true });
+        if (allErr) throw allErr;
+        setTasks(allTasks || []);
 
-        if (tasksError) throw tasksError;
-        
         // Load templates
-        const { data: templatesData, error: templatesError } = await supabase
+        const { data: tmpl, error: tmplErr } = await supabase
           .from("task_templates")
-          .select("*")
-          .order("created_at", { ascending: false });
+          .select("*");
+        if (tmplErr) throw tmplErr;
+        setTemplates(tmpl || []);
 
-        if (templatesError) throw templatesError;
-
-        // Load users and roles
-        const [usersRes, rolesRes] = await Promise.all([
-          supabase.from("users").select("id, email, name").order("created_at", { ascending: false }),
-          supabase.from("roles").select("id, name").order("name", { ascending: true })
-        ]);
-
-        if (active) {
-          setTasks(tasksData || []);
-          setTemplates(templatesData || []);
-          setUsers(usersRes.data || []);
-          setRoles(rolesRes.data || []);
-        }
-      } catch (err) {
-        if (active) {
-          setError(err instanceof Error ? err.message : "Failed to load data");
-        }
+        // Subscribe to realtime changes for today
+        sub = supabase
+          .channel('gm-tasks')
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'task_instances',
+            filter: `for_date=eq.${today}`,
+          }, (payload: any) => {
+            setTasks((prev) => {
+              if (payload.eventType === 'INSERT') {
+                if (!prev.some((t) => t.id === payload.new.id)) {
+                  return [...prev, payload.new];
+                }
+                return prev;
+              }
+              if (payload.eventType === 'UPDATE') {
+                return prev.map((t) => t.id === payload.new.id ? { ...t, ...payload.new } : t);
+              }
+              if (payload.eventType === 'DELETE') {
+                return prev.filter((t) => t.id !== payload.old.id);
+              }
+              return prev;
+            });
+          })
+          .subscribe();
+      } catch (e: any) {
+        setError(e?.message || "Failed to load tasks/templates");
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
-    }
-
-    loadData();
-    
-    // Set up real-time subscription
-    const sub = supabase
-      .channel("general-manager-tasks")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
-        loadData();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "task_templates" }, () => {
-        loadData();
-      })
-      .subscribe();
-
-    return () => { 
-      active = false;
-      if (sub) sub.unsubscribe();
     };
+    load();
+    return () => { if (sub) sub.unsubscribe(); };
   }, [today]);
 
   // Create today's tasks from templates
   const createTasks = async () => {
-    if (creating || templates.length === 0) return;
     setCreating(true);
     setError(null);
-
     try {
-      const tasksToCreate = templates.map(template => ({
-        title: template.title,
-        name: template.name,
-        description: template.description,
-        notes: template.default_notes,
+      // For each template, create a task_instance for today
+      const payloads = templates.map((tmpl) => ({
+        title: tmpl.title || tmpl.name,
+        description: tmpl.description,
+        notes: tmpl.default_notes,
         for_date: today,
-        due_at: template.due_at ? `${today}T${template.due_at}:00` : null,
-        assignee_role_id: template.assignee_role_id,
-        assignee_user_id: template.assignee_user_id,
-        status: "pending"
+        assignee_role_id: tmpl.assignee_role_id,
+        assignee_user_id: tmpl.assignee_user_id,
+        due_at: tmpl.due_at,
+        status: "pending",
       }));
-
-      const { error } = await supabase.from("tasks").insert(tasksToCreate);
-      if (error) throw error;
-      
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create tasks");
+      if (payloads.length === 0) throw new Error("No templates found");
+      const { error: insErr } = await supabase
+        .from("task_instances")
+        .insert(payloads);
+      if (insErr) throw insErr;
+    } catch (e: any) {
+      setError(e?.message || "Failed to create tasks");
     } finally {
       setCreating(false);
     }
   };
 
-  // Handle custom task creation
-  const handleCreateTask = async (e: React.FormEvent) => {
+  // Custom task creation handler
+  const handleCreateTask = async (e: any) => {
     e.preventDefault();
-    if (creatingTask || !newTask.title.trim()) return;
-    
     setCreatingTask(true);
     try {
-      const taskData = {
-        title: newTask.title.trim(),
-        notes: newTask.notes.trim() || null,
+      const payload: any = {
+        title: newTask.title,
+        notes: newTask.notes,
         for_date: today,
-        due_at: newTask.due_at ? `${today}T${newTask.due_at}:00` : null,
+        due_at: newTask.due_at || null,
         assignee_user_id: newTask.assignee_user_id || null,
         assignee_role_id: newTask.assignee_role_id || null,
-        status: "pending"
+        status: "pending",
       };
-
-      const { error } = await supabase.from("tasks").insert([taskData]);
-      if (error) throw error;
-
-      setNewTask({ title: "", notes: "", due_at: "", assignee_user_id: "", assignee_role_id: "" });
+      if (!payload.title) throw new Error("Title required");
+      const { error: insErr } = await supabase.from("task_instances").insert([payload]);
+      if (insErr) throw insErr;
       setShowCreate(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create task");
+      setNewTask({ title: "", notes: "", due_at: "", assignee_user_id: "", assignee_role_id: "" });
+    } catch (e: any) {
+      setError(e?.message || "Failed to create task");
     } finally {
       setCreatingTask(false);
     }
   };
 
-  // Handle user creation
-  const handleCreateUser = async (e: React.FormEvent) => {
+  // User creation handler
+  const handleCreateUser = async (e: any) => {
     e.preventDefault();
-    if (creatingUser || !newUser.email.trim() || !newUser.password.trim()) return;
-
     setCreatingUser(true);
     setUserError(null);
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: newUser.email.trim(),
-        password: newUser.password,
-        options: {
-          data: {
-            name: newUser.name.trim() || null
-          }
-        }
-      });
-
-      if (error) throw error;
-
-      if (data.user && newUser.role_id) {
-        const { error: roleError } = await supabase
-          .from("user_roles")
-          .insert([{ user_id: data.user.id, role_id: newUser.role_id }]);
-        
-        if (roleError) console.warn("Role assignment failed:", roleError.message);
+      if (!newUser.email || !newUser.password) {
+        throw new Error("Email and password are required");
       }
 
-      setNewUser({ email: "", password: "", name: "", role_id: "" });
-    } catch (err) {
-      setUserError(err instanceof Error ? err.message : "Failed to create user");
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newUser.email,
+        password: newUser.password,
+      });
+
+      if (authError) throw authError;
+
+      if (authData.user) {
+        // Create profile
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .insert([{
+            id: authData.user.id,
+            email: newUser.email,
+            name: newUser.name || null,
+          }]);
+
+        if (profileError) throw profileError;
+
+        // Assign role if selected
+        if (newUser.role_id) {
+          const { error: roleError } = await supabase
+            .from("user_roles")
+            .insert([{
+              user_id: authData.user.id,
+              role_id: newUser.role_id,
+            }]);
+
+          if (roleError) throw roleError;
+        }
+
+        // Refresh users list
+        const { data: userData } = await supabase.from("profiles").select("id,email,name");
+        setUsers(userData || []);
+
+        // Reset form
+        setNewUser({ email: "", password: "", name: "", role_id: "" });
+        setShowUserManagement(false);
+      }
+    } catch (e: any) {
+      setUserError(e?.message || "Failed to create user");
     } finally {
       setCreatingUser(false);
     }
   };
 
-  // Handle template creation
-  const handleCreateTemplate = async (e: React.FormEvent) => {
+  // Template creation handler
+  const handleCreateTemplate = async (e: any) => {
     e.preventDefault();
-    if (creatingTemplate || !newTemplate.title.trim()) return;
-
     setCreatingTemplate(true);
     setTemplateError(null);
     try {
-      const templateData = {
-        title: newTemplate.title.trim(),
-        name: newTemplate.title.trim(),
-        description: newTemplate.description.trim() || null,
-        default_notes: newTemplate.default_notes.trim() || null,
-        assignee_role_id: newTemplate.assignee_role_id || null,
-        assignee_user_id: newTemplate.assignee_user_id || null,
-        due_at: newTemplate.due_at || null
-      };
+      if (!newTemplate.title) {
+        throw new Error("Template title is required");
+      }
 
-      const { error } = await supabase.from("task_templates").insert([templateData]);
-      if (error) throw error;
+      const { error: templateError } = await supabase
+        .from("task_templates")
+        .insert([{
+          title: newTemplate.title,
+          description: newTemplate.description || null,
+          default_notes: newTemplate.default_notes || null,
+          assignee_role_id: newTemplate.assignee_role_id || null,
+          due_at: newTemplate.due_at || null,
+        }]);
 
-      setNewTemplate({ title: "", description: "", default_notes: "", assignee_role_id: "", assignee_user_id: "", due_at: "" });
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : "Failed to create template");
+      if (templateError) throw templateError;
+
+      // Refresh templates list
+      const { data: tmpl, error: tmplErr } = await supabase
+        .from("task_templates")
+        .select("*");
+      if (tmplErr) throw tmplErr;
+      setTemplates(tmpl || []);
+
+      // Reset form
+      setNewTemplate({ title: "", description: "", default_notes: "", assignee_role_id: "", due_at: "" });
+      setShowTemplateManagement(false);
+    } catch (e: any) {
+      setTemplateError(e?.message || "Failed to create template");
     } finally {
       setCreatingTemplate(false);
     }
@@ -258,29 +304,79 @@ export default function GeneralManagerPage() {
 
   // Delete template
   const deleteTemplate = async (templateId: string | number) => {
-    if (!confirm("Are you sure you want to delete this template?")) return;
-    
     try {
       const { error } = await supabase
         .from("task_templates")
         .delete()
         .eq("id", templateId);
-      
+
       if (error) throw error;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete template");
+
+      // Refresh templates list
+      const { data: tmpl, error: tmplErr } = await supabase
+        .from("task_templates")
+        .select("*");
+      if (tmplErr) throw tmplErr;
+      setTemplates(tmpl || []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to delete template");
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container mx-auto max-w-7xl p-6">
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      </div>
-    );
-  }
+  // Mark done/undo
+  const toggleDone = async (task: Task) => {
+    try {
+      setUpdatingIds((prev) => new Set(prev).add(task.id));
+      const done = !!(task.completed_at || task.status === "completed" || task.status === "done");
+      const patch: any = done
+        ? { completed_at: null, status: "pending" }
+        : { completed_at: new Date().toISOString(), status: "completed" };
+      const { error: updErr } = await supabase
+        .from("task_instances")
+        .update(patch)
+        .eq("id", task.id);
+      if (updErr) throw updErr;
+    } catch (e: any) {
+      setError(e?.message || "Failed to update task");
+    } finally {
+      setUpdatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  };
+
+  // Edit notes/completion reason
+  const startEdit = (task: Task) => {
+    setEditingId(task.id);
+    setEditNotes(task.notes || "");
+    setEditReason(task.completion_reason || "");
+  };
+  
+  const saveEdit = async (task: Task) => {
+    try {
+      setUpdatingIds((prev) => new Set(prev).add(task.id));
+      const patch: any = {
+        notes: editNotes,
+        completion_reason: editReason,
+      };
+      const { error: updErr } = await supabase
+        .from("task_instances")
+        .update(patch)
+        .eq("id", task.id);
+      if (updErr) throw updErr;
+      setEditingId(null);
+    } catch (e: any) {
+      setError(e?.message || "Failed to update notes/reason");
+    } finally {
+      setUpdatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="container mx-auto max-w-7xl p-6">
@@ -288,19 +384,11 @@ export default function GeneralManagerPage() {
         <h1 className="text-3xl font-semibold text-slate-900 mb-2">General Manager</h1>
         <p className="text-slate-600">Comprehensive management dashboard for restaurant operations</p>
       </div>
-
-      {error && (
-        <div className="alert alert-error mb-8">
-          {error}
-        </div>
-      )}
       
       {/* Status Overview */}
-      <div className="card mb-8">
-        <div className="p-6">
-          <h2 className="text-lg font-medium text-slate-900 mb-3">System Status</h2>
-          <div className="text-sm text-slate-600">All systems operational. Dashboard ready for management activities.</div>
-        </div>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8">
+        <h2 className="text-lg font-medium text-slate-900 mb-3">System Status</h2>
+        <div className="text-sm text-slate-600">All systems operational. Dashboard ready for management activities.</div>
       </div>
       
       {/* Primary Actions */}
@@ -314,19 +402,19 @@ export default function GeneralManagerPage() {
         </button>
         <button
           className="btn btn-secondary"
-          onClick={() => setShowCreate(!showCreate)}
+          onClick={() => setShowCreate((v) => !v)}
         >
           {showCreate ? "Cancel" : "Create Custom Task"}
         </button>
         <button
           className="btn btn-outline"
-          onClick={() => setShowUserManagement(!showUserManagement)}
+          onClick={() => setShowUserManagement((v) => !v)}
         >
           {showUserManagement ? "Close" : "Manage Users"}
         </button>
         <button
           className="btn btn-outline"
-          onClick={() => setShowTemplateManagement(!showTemplateManagement)}
+          onClick={() => setShowTemplateManagement((v) => !v)}
         >
           {showTemplateManagement ? "Close" : "Task Templates"}
         </button>
@@ -353,7 +441,7 @@ export default function GeneralManagerPage() {
           </div>
         </a>
       </div>
-
+      
       {/* Custom task creation form */}
       {showCreate && (
         <div className="card mb-8">
@@ -432,7 +520,7 @@ export default function GeneralManagerPage() {
           </form>
         </div>
       )}
-
+      
       {/* User Management Section */}
       {showUserManagement && (
         <div className="card mb-8">
@@ -622,7 +710,7 @@ export default function GeneralManagerPage() {
           </div>
 
           {/* Current Templates List */}
-          <div className="p-6">
+          <div className="p-6 border-b border-slate-200">
             <h4 className="text-base font-medium text-slate-900 mb-4">Current Templates ({templates.length})</h4>
             <div className="space-y-3 max-h-64 overflow-y-auto">
               {templates.length === 0 ? (
@@ -660,52 +748,169 @@ export default function GeneralManagerPage() {
           </div>
         </div>
       )}
-
-      {/* Tasks Display */}
+      
+      {loading && <p className="text-center text-gray-600">Loading tasks...</p>}
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-red-700 text-sm">{error}</div>}
+      
+      {/* Task Management Section */}
       {tasks.length > 0 && (
-        <div className="card">
-          <div className="border-b border-slate-200 p-6">
-            <h2 className="text-lg font-medium text-slate-900">Today's Tasks ({tasks.length})</h2>
-            <p className="text-sm text-slate-600 mt-1">Manage and track daily operational tasks</p>
+        <>
+          {/* Bulk actions bar */}
+          <div className="bg-gray-50 border rounded-lg p-3 mb-4">
+            <div className="text-sm font-medium mb-2">🔧 Bulk Actions ({selectedIds.size} selected)</div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="px-3 py-1 rounded-lg text-sm bg-emerald-600 text-white disabled:bg-gray-300"
+                disabled={selectedIds.size === 0}
+                onClick={async () => {
+                  for (const id of selectedIds) await toggleDone(tasks.find(t => t.id === id)!);
+                  setSelectedIds(new Set());
+                }}
+              >✅ Toggle Done</button>
+              <button
+                className="px-3 py-1 rounded-lg text-sm bg-blue-600 text-white disabled:bg-gray-300"
+                disabled={selectedIds.size === 0}
+                onClick={() => {
+                  const first = tasks.find(t => t.id === Array.from(selectedIds)[0]);
+                  if (first) startEdit(first);
+                }}
+              >✏️ Edit Notes</button>
+              <button
+                className="px-3 py-1 rounded-lg text-sm bg-red-600 text-white disabled:bg-gray-300"
+                disabled={selectedIds.size === 0}
+                onClick={async () => {
+                  if (!window.confirm("Delete selected tasks?")) return;
+                  for (const id of selectedIds) {
+                    await supabase.from("task_instances").delete().eq("id", id);
+                  }
+                  setSelectedIds(new Set());
+                }}
+              >🗑️ Delete</button>
+              <select
+                className="px-2 py-1 rounded-lg border text-sm disabled:bg-gray-100"
+                disabled={selectedIds.size === 0}
+                onChange={async (e) => {
+                  const val = e.target.value;
+                  if (!val) return;
+                  for (const id of selectedIds) {
+                    await supabase.from("task_instances").update({ assignee_user_id: val }).eq("id", id);
+                  }
+                  setSelectedIds(new Set());
+                }}
+              >
+                <option value="">👤 Assign to user</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email || u.id}</option>)}
+              </select>
+              <select
+                className="px-2 py-1 rounded-lg border text-sm disabled:bg-gray-100"
+                disabled={selectedIds.size === 0}
+                onChange={async (e) => {
+                  const val = e.target.value;
+                  if (!val) return;
+                  for (const id of selectedIds) {
+                    await supabase.from("task_instances").update({ assignee_role_id: val }).eq("id", id);
+                  }
+                  setSelectedIds(new Set());
+                }}
+              >
+                <option value="">👥 Assign to role</option>
+                {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
           </div>
-          
-          <div className="p-6 space-y-4">
-            {tasks.map((t) => {
-              const title = t.title || t.name || `Task ${t.id}`;
-              const done = !!(t.completed_at || t.status === "completed" || t.status === "done");
-              const checked = selectedIds.has(t.id);
-              return (
-                <div key={t.id} className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={e => {
-                          setSelectedIds(prev => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(t.id);
-                            else next.delete(t.id);
-                            return next;
-                          });
-                        }}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                      />
-                      <div>
-                        <div className="font-medium text-slate-900">{title}</div>
-                        {t.due_at && (
-                          <div className="text-sm text-slate-500">Due: {new Date(t.due_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                        )}
+      {/* Tasks Display */}
+      <div className="card">
+        <div className="border-b border-slate-200 p-6">
+          <h2 className="text-lg font-medium text-slate-900">Today's Tasks ({tasks.length})</h2>
+          <p className="text-sm text-slate-600 mt-1">Manage and track daily operational tasks</p>
+        </div>
+        
+        <div className="p-6 space-y-4">
+          {tasks.map((t) => {
+            const title = t.title || t.name || `Task ${t.id}`;
+            const done = !!(t.completed_at || t.status === "completed" || t.status === "done");
+            const checked = selectedIds.has(t.id);
+            return (
+              <div key={t.id} className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={e => {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(t.id);
+                          else next.delete(t.id);
+                          return next;
+                        });
+                      }}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="font-medium text-slate-900">{title}</div>
+                      {t.due_at && (
+                        <div className="text-sm text-slate-500">Due: {new Date(t.due_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                      )}
+                        <div className="text-sm text-gray-500">
+                          👤 User: {t.assignee_user_id || "Unassigned"} | 👥 Role: {t.assignee_role_id || "Unassigned"}
+                        </div>
                       </div>
                     </div>
-                    <div className={`px-2 py-1 text-xs font-medium rounded ${done ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                      {done ? 'Complete' : 'Pending'}
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm px-3 py-1 rounded-full font-medium ${done ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {done ? "✅ Done" : "⏳ Pending"}
+                      </span>
+                      <button
+                        disabled={updatingIds.has(t.id)}
+                        onClick={() => toggleDone(t)}
+                        className={`text-sm rounded-lg px-3 py-1 border font-medium ${done ? "bg-white hover:bg-gray-50" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}
+                      >
+                        {updatingIds.has(t.id) ? "⏳" : done ? "↩️ Undo" : "✅ Done"}
+                      </button>
+                      <button
+                        className="text-sm rounded-lg px-3 py-1 border bg-blue-50 hover:bg-blue-100 font-medium"
+                        onClick={() => startEdit(t)}
+                      >✏️ Edit</button>
                     </div>
                   </div>
-                  {t.notes && (
-                    <div className="text-sm text-slate-600 pl-7">
-                      {t.notes}
-                    </div>
+                  
+                  {editingId === t.id ? (
+                    <form
+                      className="mt-3 space-y-3 p-3 bg-gray-50 rounded-lg"
+                      onSubmit={e => { e.preventDefault(); saveEdit(t); }}
+                    >
+                      <textarea
+                        className="w-full rounded-lg border px-3 py-2 text-sm"
+                        rows={3}
+                        value={editNotes}
+                        onChange={e => setEditNotes(e.target.value)}
+                        placeholder="Task notes or instructions"
+                      />
+                      <input
+                        className="w-full rounded-lg border px-3 py-2 text-sm"
+                        value={editReason}
+                        onChange={e => setEditReason(e.target.value)}
+                        placeholder="Completion reason (optional)"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          className="rounded-lg bg-emerald-600 px-4 py-2 text-white text-sm font-medium"
+                          disabled={updatingIds.has(t.id)}
+                        >💾 Save Changes</button>
+                        <button
+                          type="button"
+                          className="rounded-lg bg-gray-200 px-4 py-2 text-sm font-medium"
+                          onClick={() => setEditingId(null)}
+                        >❌ Cancel</button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      {t.notes && <div className="mt-2 text-sm text-gray-700 bg-gray-50 p-2 rounded">📝 {t.notes}</div>}
+                      {t.completion_reason && <div className="mt-1 text-xs text-gray-500">✅ Completed: {t.completion_reason}</div>}
+                    </>
                   )}
                 </div>
               );
