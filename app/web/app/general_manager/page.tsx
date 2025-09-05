@@ -91,10 +91,16 @@ export default function GeneralManagerPage() {
 
         if (templatesError) throw templatesError;
 
-        // Load users and roles
+        // Load users and roles (with error handling)
         const [usersRes, rolesRes] = await Promise.all([
-          supabase.from("users").select("id, email, name").order("created_at", { ascending: false }),
-          supabase.from("roles").select("id, name").order("name", { ascending: true })
+          supabase.from("users").select("id, email, name").order("created_at", { ascending: false }).then(res => {
+            if (res.error) console.warn("Users query error:", res.error);
+            return res;
+          }),
+          supabase.from("roles").select("id, name").order("name", { ascending: true }).then(res => {
+            if (res.error) console.warn("Roles query error:", res.error);
+            return res;
+          })
         ]);
 
         if (active) {
@@ -212,11 +218,23 @@ export default function GeneralManagerPage() {
       if (error) throw error;
 
       if (data.user && newUser.role_id) {
+        // Try to update user role in users table
         const { error: roleError } = await supabase
-          .from("user_roles")
-          .insert([{ user_id: data.user.id, role_id: newUser.role_id }]);
+          .from("users")
+          .update({ role: newUser.role_id })
+          .eq("id", data.user.id);
         
-        if (roleError) console.warn("Role assignment failed:", roleError.message);
+        if (roleError) {
+          console.warn("Role assignment failed:", roleError.message);
+          // Fallback to user_roles table if it exists
+          try {
+            await supabase
+              .from("user_roles")
+              .insert([{ user_id: data.user.id, role_id: newUser.role_id }]);
+          } catch (fallbackError) {
+            console.warn("Fallback role assignment also failed:", fallbackError);
+          }
+        }
       }
 
       setNewUser({ email: "", password: "", name: "", role_id: "" });

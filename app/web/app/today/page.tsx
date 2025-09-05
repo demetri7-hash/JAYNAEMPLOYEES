@@ -78,35 +78,51 @@ export default function TodayPage() {
           return;
         }
 
-        // Load user's roles
-        const { data: userRoles, error: rolesErr } = await supabase
-          .from("user_roles")
-          .select("role_id")
-          .eq("user_id", _uid);
-        if (rolesErr) throw rolesErr;
-        
-        const _roleIds = (userRoles || []).map((r: any) => r.role_id);
+        // Load user's roles (try simple structure first)
+        let _roleIds: string[] = [];
+        try {
+          // Try simple users table with role column
+          const { data: userData } = await supabase
+            .from("users")
+            .select("role")
+            .eq("id", _uid)
+            .single();
+          
+          if (userData?.role) {
+            _roleIds = [userData.role];
+          } else {
+            // Fallback to complex structure
+            const { data: userRoles } = await supabase
+              .from("user_roles")
+              .select("role_id")
+              .eq("user_id", _uid);
+            _roleIds = (userRoles || []).map((r: any) => r.role_id);
+          }
+        } catch (roleErr) {
+          console.warn("Could not load user roles:", roleErr);
+          _roleIds = [];
+        }
         setRoleIds(_roleIds);
 
         // Load tasks assigned directly to user
         const { data: userTasks, error: userTasksErr } = await supabase
-          .from("task_instances")
+          .from("tasks")
           .select("*")
           .eq("for_date", today)
           .eq("assignee_user_id", _uid)
           .order("due_at", { ascending: true, nullsFirst: true });
-        if (userTasksErr) throw userTasksErr;
+        if (userTasksErr) console.warn("Error loading user tasks:", userTasksErr);
 
         // Load tasks assigned to user's roles
         let roleTasks: Task[] = [];
         if (_roleIds.length > 0) {
           const { data: _roleTasks, error: roleTasksErr } = await supabase
-            .from("task_instances")
+            .from("tasks")
             .select("*")
             .eq("for_date", today)
             .in("assignee_role_id", _roleIds)
             .order("due_at", { ascending: true, nullsFirst: true });
-          if (roleTasksErr) throw roleTasksErr;
+          if (roleTasksErr) console.warn("Error loading role tasks:", roleTasksErr);
           roleTasks = _roleTasks || [];
         }
 

@@ -96,47 +96,19 @@ export default function RoleButtons() {
         const uid = sessionData.session?.user?.id;
         if (!uid) return;
         
-        // Try to get user role from users table with role column
-        const { data: userData } = await supabase
-          .from("users")
-          .select("role")
-          .eq("id", uid)
-          .single();
+        // Get this user's role ids
+        const { data: userRoles } = await supabase
+          .from("user_roles")
+          .select("role_id")
+          .eq("user_id", uid);
+        const roleIds = (userRoles || []).map((r) => r.role_id);
         
-        if (userData?.role) {
-          setRoleNames([userData.role]);
-        } else {
-          // Fallback: try the complex user_roles/roles structure
-          try {
-            const { data: userRoles } = await supabase
-              .from("user_roles")
-              .select("role_id")
-              .eq("user_id", uid);
-            const roleIds = (userRoles || []).map((r) => r.role_id);
-            
-            const { data: roles } = await supabase.from("roles").select("id,name");
-            const names = roles?.filter((r) => roleIds.includes(r.id)).map((r) => r.name) || [];
-            setRoleNames(names);
-          } catch (fallbackError) {
-            console.log("Complex role structure not available, using simple structure");
-            // For development/testing, provide all roles
-            setRoleNames([
-              "general_manager",
-              "kitchen_manager", 
-              "assistant_manager",
-              "ordering_manager"
-            ]);
-          }
-        }
+        // Get all roles
+        const { data: roles } = await supabase.from("roles").select("id,name");
+        const names = roles?.filter((r) => roleIds.includes(r.id)).map((r) => r.name) || [];
+        setRoleNames(names);
       } catch (error) {
         console.error("Error loading roles:", error);
-        // Fallback for development
-        setRoleNames([
-          "general_manager",
-          "kitchen_manager", 
-          "assistant_manager",
-          "ordering_manager"
-        ]);
       } finally {
         setLoading(false);
       }
