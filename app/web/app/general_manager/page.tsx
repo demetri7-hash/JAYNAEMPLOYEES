@@ -65,6 +65,10 @@ export default function GeneralManagerPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
 
+  // Order approval state
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
+  const [showOrderApprovals, setShowOrderApprovals] = useState(false);
+
   // Load all today's tasks and templates
   useEffect(() => {
     let active = true;
@@ -290,6 +294,78 @@ export default function GeneralManagerPage() {
     }
   };
 
+  // Load pending orders for approval
+  const loadPendingOrders = async () => {
+    try {
+      const { data: orders } = await supabase
+        .from("orders")
+        .select(`
+          *, 
+          vendor:vendors(name),
+          order_items(*, inventory_item:inventory_items(name)),
+          creator:users!created_by(name, email)
+        `)
+        .eq("status", "pending_approval")
+        .order("created_at", { ascending: false });
+      
+      setPendingOrders(orders?.map(order => ({
+        ...order,
+        vendor_name: order.vendor?.name,
+        creator_name: order.creator?.name || order.creator?.email,
+        items: order.order_items || []
+      })) || []);
+    } catch (err) {
+      console.warn("Could not load orders:", err);
+      setPendingOrders([]);
+    }
+  };
+
+  // Approve order
+  const approveOrder = async (orderId: string) => {
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const userId = session.session?.user?.id;
+      
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "approved",
+          approved_by: userId,
+          approved_at: new Date().toISOString()
+        })
+        .eq("id", orderId);
+      
+      if (error) throw error;
+      loadPendingOrders(); // Reload orders
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to approve order");
+    }
+  };
+
+  // Reject order
+  const rejectOrder = async (orderId: string) => {
+    if (!confirm("Are you sure you want to reject this order?")) return;
+    
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: "cancelled" })
+        .eq("id", orderId);
+      
+      if (error) throw error;
+      loadPendingOrders(); // Reload orders
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject order");
+    }
+  };
+
+  // Load orders when order approvals section is opened
+  useEffect(() => {
+    if (showOrderApprovals) {
+      loadPendingOrders();
+    }
+  }, [showOrderApprovals]);
+
   if (loading) {
     return (
       <div className="container mx-auto max-w-7xl p-6">
@@ -322,7 +398,7 @@ export default function GeneralManagerPage() {
       </div>
       
       {/* Primary Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         <button
           className="btn btn-primary"
           onClick={createTasks}
@@ -347,6 +423,12 @@ export default function GeneralManagerPage() {
           onClick={() => setShowTemplateManagement(!showTemplateManagement)}
         >
           {showTemplateManagement ? "Close" : "Task Templates"}
+        </button>
+        <button
+          className={`btn ${pendingOrders.length > 0 ? 'btn-primary bg-yellow-500 border-yellow-500 hover:bg-yellow-600' : 'btn-outline'}`}
+          onClick={() => setShowOrderApprovals(!showOrderApprovals)}
+        >
+          {showOrderApprovals ? "Close" : `Approve Orders${pendingOrders.length > 0 ? ` (${pendingOrders.length})` : ''}`}
         </button>
       </div>
       
@@ -675,6 +757,86 @@ export default function GeneralManagerPage() {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Order Approval Section */}
+      {showOrderApprovals && (
+        <div className="card mb-8">
+          <div className="border-b border-slate-200 p-6">
+            <h3 className="text-lg font-medium text-slate-900">Order Approvals</h3>
+            <p className="text-sm text-slate-600 mt-1">Review and approve purchase orders from ordering managers</p>
+          </div>
+          
+          <div className="p-6">
+            {pendingOrders.length === 0 ? (
+              <div className="text-center text-slate-500 py-8">
+                <div className="text-4xl mb-4">✅</div>
+                <div>No orders pending approval</div>
+                <div className="text-sm mt-2">All orders have been processed</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {pendingOrders.map(order => (
+                  <div key={order.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <div className="font-medium text-slate-900">{order.order_number}</div>
+                        <div className="text-sm text-slate-600">{order.vendor_name}</div>
+                        <div className="text-sm text-slate-500">
+                          Created by: {order.creator_name} • 
+                          Order Date: {new Date(order.order_date).toLocaleDateString()}
+                          {order.expected_delivery && ` • Expected: ${new Date(order.expected_delivery).toLocaleDateString()}`}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-medium text-slate-900">${order.total_amount.toFixed(2)}</div>
+                        <span className="px-2 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-800">
+                          Pending Approval
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {order.items && order.items.length > 0 && (
+                      <div className="mb-4">
+                        <div className="text-sm font-medium text-slate-900 mb-2">Order Items:</div>
+                        <div className="space-y-1">
+                          {order.items.map((item: any, index: number) => (
+                            <div key={index} className="flex justify-between text-sm">
+                              <span>{item.inventory_item?.name || `Item ${item.inventory_item_id}`}</span>
+                              <span>{item.quantity} × ${item.unit_cost.toFixed(2)} = ${item.total_cost.toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {order.notes && (
+                      <div className="mb-4 p-3 bg-blue-50 rounded text-sm">
+                        <div className="font-medium text-blue-900 mb-1">Order Notes:</div>
+                        <div className="text-blue-800">{order.notes}</div>
+                      </div>
+                    )}
+                    
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => approveOrder(order.id)}
+                        className="btn btn-primary text-sm"
+                      >
+                        Approve Order
+                      </button>
+                      <button
+                        onClick={() => rejectOrder(order.id)}
+                        className="btn btn-outline text-sm border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+                      >
+                        Reject Order
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
